@@ -1,1 +1,3 @@
-# Stdlib only for daily_alerts_splitter.
+# Core deps for vectorGen.
+numpy
+pandas
