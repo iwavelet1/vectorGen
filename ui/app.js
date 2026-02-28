@@ -49,22 +49,61 @@
   const rawAttrsPanel = document.getElementById("raw-attrs-panel");
   const rawAttrsCheckboxes = document.getElementById("raw-attrs-checkboxes");
 
-  var RAW_ATTR_GROUPS = [
-    { label: "Id", attrs: ["time", "bar_index", "ticker", "tf", "date", "segment_id", "received_at", "text", "payload", "start_time", "duration_min", "closing_bar_index", "bars"] },
-    { label: "Price / VWAP", attrs: ["close", "open", "high", "low", "REV_avwap", "p0_close", "p1_close", "rev_avwap_side_frac", "rev_avwap_cross_count", "rev_avwap_dist_abs_mean_pct", "htfVwap_side_frac", "htfVwap_cross_count"] },
-    { label: "Reversal / bar", attrs: ["revDir", "volume", "delta_pct", "slope_pctPerMin", "range_pct", "efficiency"] },
-    { label: "Volume", attrs: ["dollarVol_sum", "vol_slope", "vol_peak_ratio"] },
-    { label: "ATR", attrs: ["atrRatio_peak", "atrRatio_q50", "atrNow", "atrBase"] },
-    { label: "Trend / regime", attrs: ["tTrendAbs_area", "tTrendAbs_active_frac", "inTrendScore_area", "tRegimeAbs_active_frac", "smaCrossScoreInd_active_frac"] },
-    { label: "Shock", attrs: ["tShockScoreTot_peak", "tShockScoreTot_density", "tShock_time_to_peak"] },
-    { label: "Classification", attrs: ["profit_score", "entry_score", "maintain_score", "tradeability_score", "tier", "next_profit_score", "next_entry_score", "next_maintain_score", "next_tradeability_score", "next_delta_pct", "next_tier"] }
-  ];
-  var RAW_ATTR_NAMES = RAW_ATTR_GROUPS.reduce(function (acc, g) { return acc.concat(g.attrs); }, []);
-  var rawAttrsSelected = ["time", "revDir", "close", "bar_index", "REV_avwap"];
+  var SOURCE_ATTR_GROUPS = {
+    alerts: [
+      { label: "Id", attrs: ["time", "bar_index", "ticker", "tickerid", "tf", "received_at"] },
+      { label: "Price / VWAP", attrs: ["close", "volume", "htfVwap", "REV_avwap", "TRADE_avwap", "htf", "htf2"] },
+      { label: "Reversal", attrs: ["revDir", "reversalScore", "shockDir", "shockScore", "noneDir", "noneScore", "inTrendScore", "trendDir"] },
+      { label: "Trend", attrs: ["tTrendDir", "tTrendAbs", "tRegimeDir", "tRegimeAbs", "tPreDir", "tPreAbs", "tPreCDir", "tPreCAbs"] },
+      { label: "Peak / Shock", attrs: ["tPeakDir", "tPeakConf", "tShockDirTot", "tShockScoreTot"] },
+      { label: "ATR", attrs: ["atrNow", "atrBase", "atrRatio"] },
+      { label: "SMA Cross", attrs: ["smaCrossDirHTF", "smaCrossScoreHTF", "smaCrossDirInd", "smaCrossScoreInd", "htfSmaFastDir", "htfSmaFastScore", "htfSmaFastBarsSince"] },
+      { label: "FSM", attrs: ["FSM_State", "prev_state", "new_state"] }
+    ],
+    raw_vectors: [
+      { label: "Id", attrs: ["time", "bar_index", "ticker", "tickerid", "tf", "received_at"] },
+      { label: "Price / VWAP", attrs: ["close", "volume", "htfVwap", "REV_avwap", "TRADE_avwap", "htf", "htf2"] },
+      { label: "Reversal", attrs: ["revDir", "reversalScore", "shockDir", "shockScore", "noneDir", "noneScore", "inTrendScore", "trendDir"] },
+      { label: "Trend", attrs: ["tTrendDir", "tTrendAbs", "tRegimeDir", "tRegimeAbs", "tPreDir", "tPreAbs", "tPreCDir", "tPreCAbs"] },
+      { label: "Peak / Shock", attrs: ["tPeakDir", "tPeakConf", "tShockDirTot", "tShockScoreTot"] },
+      { label: "ATR", attrs: ["atrNow", "atrBase", "atrRatio"] },
+      { label: "SMA Cross", attrs: ["smaCrossDirHTF", "smaCrossScoreHTF", "smaCrossDirInd", "smaCrossScoreInd", "htfSmaFastDir", "htfSmaFastScore", "htfSmaFastBarsSince"] },
+      { label: "FSM", attrs: ["FSM_State", "prev_state", "new_state"] }
+    ],
+    trades: [
+      { label: "Id", attrs: ["time", "bar_index", "ticker", "tf", "received_at"] },
+      { label: "Trade", attrs: ["event", "dir", "entryPx", "exitPx", "pnl", "tradeScore"] },
+      { label: "Price / VWAP", attrs: ["close", "volume", "TRADE_avwap", "REV_avwap", "htf", "htf2"] },
+      { label: "ATR", attrs: ["atrNow", "atrBase"] },
+      { label: "Trend", attrs: ["trendDir", "tPreDir", "tPreCDir", "smaCrossDirInd"] },
+      { label: "FSM", attrs: ["prev_state", "new_state"] }
+    ],
+    classified: [
+      { label: "Id", attrs: ["closing_bar_index", "segment_id", "ticker", "tf", "date", "start_time", "duration_min", "bars"] },
+      { label: "Price", attrs: ["p0_close", "p1_close", "delta_pct", "range_pct", "efficiency"] },
+      { label: "Volume", attrs: ["dollarVol_sum", "vol_slope", "vol_peak_ratio"] },
+      { label: "ATR", attrs: ["atrRatio_peak", "atrRatio_q50"] },
+      { label: "VWAP", attrs: ["rev_avwap_side_frac", "rev_avwap_cross_count", "rev_avwap_dist_abs_mean_pct", "htfVwap_side_frac", "htfVwap_cross_count"] },
+      { label: "Shock", attrs: ["tShockScoreTot_peak", "tShockScoreTot_density", "tShock_time_to_peak"] },
+      { label: "Trend", attrs: ["tTrendAbs_area", "tTrendAbs_active_frac", "inTrendScore_area", "tRegimeAbs_active_frac", "smaCrossScoreInd_active_frac"] },
+      { label: "Classification", attrs: ["profit_score", "entry_score", "maintain_score", "tradeability_score", "tier", "next_profit_score", "next_entry_score", "next_maintain_score", "next_tradeability_score", "next_delta_pct", "next_tier"] }
+    ]
+  };
+  var SOURCE_DEFAULTS = {
+    alerts:      ["time", "bar_index", "revDir", "close", "REV_avwap"],
+    raw_vectors: ["time", "bar_index", "revDir", "close", "REV_avwap"],
+    trades:      ["time", "bar_index", "event", "dir", "entryPx", "exitPx", "pnl"],
+    classified:  ["start_time", "closing_bar_index", "p0_close", "delta_pct", "tier", "tradeability_score"]
+  };
+  var rawAttrsSelected = SOURCE_DEFAULTS["alerts"].slice();
+
+  function currentSourceGroups() {
+    return SOURCE_ATTR_GROUPS[rawSelSource.value] || SOURCE_ATTR_GROUPS["alerts"];
+  }
 
   function initRawAttrsCheckboxes() {
     rawAttrsCheckboxes.innerHTML = "";
-    RAW_ATTR_GROUPS.forEach(function (group) {
+    currentSourceGroups().forEach(function (group) {
       var groupDiv = document.createElement("div");
       groupDiv.className = "raw-attrs-group";
       var submenu = document.createElement("div");
@@ -103,10 +142,14 @@
   }
 
   function getSelectedRawAttrs() {
-    return RAW_ATTR_NAMES.filter(function (attr) {
-      return rawAttrsSelected.indexOf(attr) !== -1;
-    });
+    var sourceAttrs = currentSourceGroups().reduce(function (acc, g) { return acc.concat(g.attrs); }, []);
+    return sourceAttrs.filter(function (attr) { return rawAttrsSelected.indexOf(attr) !== -1; });
   }
+
+  rawSelSource.addEventListener("change", function () {
+    rawAttrsSelected = (SOURCE_DEFAULTS[rawSelSource.value] || SOURCE_DEFAULTS["alerts"]).slice();
+    initRawAttrsCheckboxes();
+  });
 
   rawAttrsTrigger.addEventListener("click", function (e) {
     e.stopPropagation();
@@ -114,10 +157,11 @@
     rawAttrsTrigger.setAttribute("aria-expanded", !rawAttrsPanel.hidden);
   });
   document.addEventListener("click", function (e) {
-    if (!rawAttrsPanel.hidden && !rawAttrsTrigger.contains(e.target) && !rawAttrsPanel.contains(e.target)) {
-      rawAttrsPanel.hidden = true;
-      rawAttrsTrigger.setAttribute("aria-expanded", "false");
-    }
+    if (rawAttrsPanel.hidden) return;
+    if (rawAttrsTrigger.contains(e.target) || rawAttrsPanel.contains(e.target)) return;
+    if (leftRaw.contains(e.target)) return;
+    rawAttrsPanel.hidden = true;
+    rawAttrsTrigger.setAttribute("aria-expanded", "false");
   });
 
   loadClassifiedManifest();
@@ -396,6 +440,7 @@
   function onRawListClick() {
     var source = rawSelSource.value;
     rawPlaceholder.hidden = true;
+    rawAlertsWrap.hidden = true;
     rawFilesWrap.hidden = false;
     rawFilesBody.innerHTML = "";
     fetch("/api/raw/" + source)
@@ -427,14 +472,21 @@
     var asset = rawSelAsset.value;
     var date = rawSelDate.value;
     var tf = rawSelTf.value;
+    var source = rawSelSource.value;
     var startHm = (rawFromTime.value || "0930").replace(/\D/g, "").slice(0, 4);
-    var endHm = (rawToTime.value || "1030").replace(/\D/g, "").slice(0, 4);
+    var endHm = (rawToTime.value || "1600").replace(/\D/g, "").slice(0, 4);
     if (startHm.length === 3) startHm = "0" + startHm;
     if (endHm.length === 3) endHm = "0" + endHm;
     rawAlertsError.textContent = "";
     rawAlertsBody.innerHTML = "";
+    rawFilesWrap.hidden = true;
     if (!asset || !date) {
       rawAlertsError.textContent = "Select asset and date first.";
+      rawAlertsWrap.hidden = false;
+      return;
+    }
+    if (source === "classified" && !tf) {
+      rawAlertsError.textContent = "Select asset, date, and TF first.";
       rawAlertsWrap.hidden = false;
       return;
     }
@@ -443,8 +495,9 @@
     if (startHm) q += "&start_hm=" + encodeURIComponent(startHm);
     if (endHm) q += "&end_hm=" + encodeURIComponent(endHm);
     var attrs = getSelectedRawAttrs();
-    if (attrs.length === 0) attrs = ["time", "revDir", "close", "bar_index", "REV_avwap"];
-    fetch("/api/alerts/bars?" + q)
+    if (attrs.length === 0) attrs = (SOURCE_DEFAULTS[source] || SOURCE_DEFAULTS["alerts"]).slice();
+    var url = source === "classified" ? "/api/classified/records?" + q : "/api/alerts/bars?" + q;
+    fetch(url)
       .then(function (r) { return r.json(); })
       .then(function (data) {
         if (data.error) {
@@ -452,26 +505,28 @@
           rawAlertsWrap.hidden = false;
           return;
         }
-        var bars = data.bars || [];
-        rawAlertsThead.firstChild.innerHTML = attrs.map(function (a) { return "<th>" + escapeHtml(a) + "</th>"; }).join("");
+        var rows = source === "classified" ? (data.records || []) : (data.bars || []);
+        var attrsToShow = attrs;
+        rawAlertsThead.firstChild.innerHTML = attrsToShow.map(function (a) { return "<th>" + escapeHtml(a) + "</th>"; }).join("");
         rawAlertsBody.innerHTML = "";
-        bars.forEach(function (b) {
+        rows.forEach(function (b) {
           var tr = document.createElement("tr");
           var revDir = b.revDir != null ? b.revDir : "—";
           if (revDir !== "—" && revDir !== 0) tr.classList.add("rev-edge");
-          tr.innerHTML = attrs.map(function (attr) {
-            var val = b[attr] != null ? b[attr] : (attr === "time" ? (b.Time != null ? b.Time : null) : null);
-            if (attr === "time" && (val != null || b.Time != null)) return "<td>" + barTimeToHm(val || b.Time) + "</td>";
+          tr.innerHTML = attrsToShow.map(function (attr) {
+            var val = b[attr] != null ? b[attr] : (attr === "time" ? (b.Time != null ? b.Time : b.start_time) : (attr === "start_time" ? b.start_time : null));
+            if ((attr === "time" || attr === "start_time") && val != null) return "<td>" + barTimeToHm(val) + "</td>";
             if (typeof val === "number") return "<td>" + (Number.isInteger(val) ? String(val) : Number(val).toFixed(2)) + "</td>";
             return "<td>" + (val != null ? escapeHtml(String(val)) : "—") + "</td>";
           }).join("");
           rawAlertsBody.appendChild(tr);
         });
-        rawAlertsError.textContent = (data.file ? "File: " + data.file + ". " : "") + bars.length + " bars.";
+        rawAlertsError.textContent = source === "classified" ? (data.files && data.files.length ? data.files.length + " files. " : "") + rows.length + " records." : (data.file ? "File: " + data.file + ". " : "") + rows.length + " bars.";
         rawAlertsWrap.hidden = false;
+        if (rows.length === 0) rawAlertsError.textContent = (rawAlertsError.textContent || "") + " No data. Check asset, date, TF and that " + (source === "classified" ? "classified files exist." : "alert file exists.");
       })
       .catch(function () {
-        rawAlertsError.textContent = "Failed to load alerts.";
+        rawAlertsError.textContent = "Failed to load " + (source === "classified" ? "classified records." : "alerts.");
         rawAlertsWrap.hidden = false;
       });
   }

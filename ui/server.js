@@ -195,7 +195,7 @@ function tfToMinutes(tf) {
 function parseStartTimeToMin(startTimeStr) {
   if (!startTimeStr || typeof startTimeStr !== "string") return null;
   const s = startTimeStr.trim().slice(0, 19);
-  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{1,2}):(\d{2}):(\d{2})/);
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})[\sT](\d{1,2}):(\d{2}):(\d{2})/);
   if (!m) return null;
   const h = parseInt(m[4], 10);
   const min = parseInt(m[5], 10);
@@ -260,6 +260,36 @@ function getAlertsBars(asset, date, tf, startHm, endHm) {
     bars.push(rec);
   }
   return { bars, file: path.basename(fp) };
+}
+
+function getClassifiedRecords(asset, date, tf, startHm, endHm) {
+  const records = [];
+  if (!asset || !date || !tf) return { records, files: [] };
+  let files = [];
+  try {
+    const all = fs.readdirSync(classifiedDir).filter((f) => f.endsWith(".jsonl"));
+    const prefix = asset + "_" + date + "_" + tf + "_";
+    files = all.filter((f) => f.startsWith(prefix)).sort();
+  } catch {
+    return { records, files: [] };
+  }
+  for (const f of files) {
+    const fp = path.join(classifiedDir, f);
+    if (!fs.statSync(fp).isFile()) continue;
+    let content;
+    try {
+      content = fs.readFileSync(fp, "utf8");
+    } catch {
+      continue;
+    }
+    const lines = content.split("\n").filter((line) => line.trim().length > 0);
+    for (const line of lines) {
+      try {
+        records.push(JSON.parse(line));
+      } catch {}
+    }
+  }
+  return { records, files };
 }
 
 function getPlotVectors(asset, date, tf) {
@@ -383,6 +413,18 @@ const server = http.createServer((req, res) => {
       res.setHeader("Cache-Control", "no-store");
       res.end(data);
     });
+    return;
+  }
+  if (req.method === "GET" && url.pathname === "/api/classified/records") {
+    const asset = url.searchParams.get("asset") || "";
+    const date = url.searchParams.get("date") || "";
+    const tf = url.searchParams.get("tf") || "";
+    const startHm = url.searchParams.get("start_hm") || "";
+    const endHm = url.searchParams.get("end_hm") || "";
+    const data = getClassifiedRecords(asset, date, tf, startHm, endHm);
+    res.setHeader("Content-Type", "application/json");
+    res.setHeader("Cache-Control", "no-store");
+    res.end(JSON.stringify(data));
     return;
   }
   if (req.method === "GET" && url.pathname === "/api/alerts/bars") {
