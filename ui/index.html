@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>VectorGen UI</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <nav class="tab-bar" role="tablist">
+    <button type="button" role="tab" id="tab-info" aria-selected="true" data-tab="info">Info</button>
+    <button type="button" role="tab" id="tab-plot" aria-selected="false" data-tab="plot">Plot</button>
+    <button type="button" role="tab" id="tab-raw" aria-selected="false" data-tab="raw">Raw</button>
+  </nav>
+
+  <div class="content-wrap">
+    <aside class="left-col">
+      <div class="left-panel left-info" id="left-info">
+        <label>Section</label>
+        <div class="info-section-list">
+          <button type="button" class="info-section-btn" data-section="alert">Alert</button>
+          <button type="button" class="info-section-btn" data-section="raw_vector">Raw vector</button>
+          <button type="button" class="info-section-btn" data-section="classified">Classified</button>
+          <button type="button" class="info-section-btn" data-section="bin">Bin</button>
+          <button type="button" class="info-section-btn" data-section="trade">Trade</button>
+        </div>
+      </div>
+      <div class="left-panel left-plot" id="left-plot" hidden>
+        <label for="sel-asset">Asset</label>
+        <select id="sel-asset" aria-label="Asset">
+          <option value="">—</option>
+        </select>
+        <label for="sel-date">Date</label>
+        <select id="sel-date" aria-label="Date">
+          <option value="">—</option>
+        </select>
+        <label for="sel-tf">TF</label>
+        <select id="sel-tf" aria-label="Timeframe">
+          <option value="">—</option>
+        </select>
+        <label for="sel-plot-type">Plot type</label>
+        <select id="sel-plot-type" aria-label="Plot type">
+          <option value="time_series">Time series</option>
+          <option value="scatter">Scatter</option>
+          <option value="distribution">Distribution</option>
+          <option value="heatmap">Heatmap</option>
+        </select>
+        <button type="button" id="btn-plot" class="plot-btn">Plot</button>
+      </div>
+      <div class="left-panel left-raw" id="left-raw" hidden>
+        <label for="raw-sel-asset">Asset</label>
+        <select id="raw-sel-asset" aria-label="Asset">
+          <option value="">—</option>
+        </select>
+        <label for="raw-sel-date">Date</label>
+        <select id="raw-sel-date" aria-label="Date">
+          <option value="">—</option>
+        </select>
+        <label for="raw-from-time">From time</label>
+        <input type="text" id="raw-from-time" value="0930" placeholder="0930" maxlength="4" aria-label="From time HHMM" />
+        <label for="raw-to-time">To time</label>
+        <input type="text" id="raw-to-time" value="1030" placeholder="1030" maxlength="4" aria-label="To time HHMM" />
+        <label for="raw-sel-tf">TF</label>
+        <select id="raw-sel-tf" aria-label="Timeframe">
+          <option value="">—</option>
+        </select>
+        <label for="raw-sel-source">Source</label>
+        <select id="raw-sel-source" aria-label="Source">
+          <option value="alerts">Alerts</option>
+          <option value="trades">Trades</option>
+          <option value="raw_vectors">Raw vectors</option>
+          <option value="classified">Classified</option>
+        </select>
+        <div class="raw-attrs-dropdown">
+          <label>Attributes to show</label>
+          <button type="button" id="raw-attrs-trigger" class="attrs-trigger" aria-haspopup="true" aria-expanded="false">Select attributes ▾</button>
+          <div class="raw-attrs-panel" id="raw-attrs-panel" hidden>
+            <div id="raw-attrs-checkboxes"></div>
+          </div>
+        </div>
+        <button type="button" id="btn-raw-list" class="plot-btn">List files</button>
+        <button type="button" id="btn-raw-alerts" class="plot-btn">Show alerts</button>
+      </div>
+    </aside>
+    <main class="main-panel" id="main-panel">
+      <div class="main-tab main-info" id="main-info">
+        <p class="placeholder" id="placeholder">Select a section in the left panel.</p>
+        <div class="legend-wrap" id="legend-wrap" hidden>
+          <table class="legend-table">
+            <thead>
+              <tr>
+                <th>Attr name</th>
+                <th>Short desc</th>
+              </tr>
+            </thead>
+            <tbody id="legend-body"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="main-tab main-plot" id="main-plot" hidden>
+        <p class="placeholder plot-placeholder" id="plot-placeholder">Select Asset, Date, TF and click Plot.</p>
+        <div class="plot-wrap" id="plot-wrap" hidden>
+          <canvas id="plot-canvas" width="800" height="400"></canvas>
+          <div class="plot-tooltip" id="plot-tooltip" aria-live="polite"></div>
+          <div class="alerts-period-wrap" id="alerts-period-wrap">
+            <h3>Alerts in period</h3>
+            <div class="alerts-period-controls">
+              <label for="alerts-start-hm">From</label>
+              <input type="text" id="alerts-start-hm" value="0930" placeholder="0930" maxlength="4" aria-label="Start time HHMM" />
+              <label for="alerts-end-hm">To</label>
+              <input type="text" id="alerts-end-hm" value="1030" placeholder="1030" maxlength="4" aria-label="End time HHMM" />
+              <button type="button" id="btn-load-alerts">Show alerts</button>
+              <button type="button" id="btn-alerts-example">Example</button>
+            </div>
+            <p class="alerts-period-error" id="alerts-period-error" hidden></p>
+            <div class="alerts-period-table-wrap" id="alerts-period-table-wrap" hidden>
+              <table class="alerts-period-table">
+                <thead>
+                  <tr>
+                    <th>Time</th>
+                    <th>revDir</th>
+                    <th>close</th>
+                    <th>bar_index</th>
+                    <th>REV_avwap</th>
+                  </tr>
+                </thead>
+                <tbody id="alerts-period-body"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="main-tab main-raw" id="main-raw" hidden>
+        <p class="placeholder raw-placeholder" id="raw-placeholder">Select Asset, Date, Source and click List files or Show alerts.</p>
+        <div class="raw-files-wrap" id="raw-files-wrap" hidden>
+          <table class="raw-files-table">
+            <thead>
+              <tr>
+                <th>File</th>
+                <th>Records</th>
+              </tr>
+            </thead>
+            <tbody id="raw-files-body"></tbody>
+          </table>
+        </div>
+        <div class="raw-alerts-wrap" id="raw-alerts-wrap" hidden>
+          <h3>Alerts in period</h3>
+          <p class="alerts-period-error" id="raw-alerts-error"></p>
+          <div class="alerts-period-table-wrap">
+            <table class="alerts-period-table">
+              <thead id="raw-alerts-thead"><tr></tr></thead>
+              <tbody id="raw-alerts-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script src="legend-data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

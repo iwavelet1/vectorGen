@@ -4,6 +4,8 @@ Vector tooling for ETF Trend:
 
 1. **daily_alerts_splitter** – split daily alert JSONL files into per-vector raw segments.
 2. **vector_calc** – compute per-vector features and write one file per (ticker, tf).
+3. **bin/** – scripts: `classify-vectors.sh` (raw_vectors → classified), `ui-server.sh` (start/stop UI), `run_vector_calc.sh`, `run_splitter.sh`.
+4. **ui/** – web UI (legend + classified dropdowns, plot); run `bin/ui-server.sh start`; data base ~/Fin/Data.
 
 ## daily_alerts_splitter
 
@@ -28,9 +30,8 @@ python -m daily_alerts_splitter --alerts-dir /path/to/Alerts
 ## vector_calc
 
 - **Input:** `raw_vectors` folder (from `daily_alerts_splitter`), files like `SPY_260222_5_0935_1022.json`.
-- **Per raw file:** Load all bars, compute one vector record using the design in `doc/Intraday_Vector_Classification_Summary.md` (geometry, volume, ATR, trend/shock/regime/SMA, AVWAP, optional HTF).
-- **Vector ID:** `ticker_tf_yymmdd_ordinal` (e.g. `spy_5_260225_1`) where `ordinal` is the sequence number within that (ticker, date, tf) day.
-- **Output:** `vector` folder adjacent to `raw_vectors`, one JSONL file per (ticker, tf): `ticker_tf_firstDate_firstOrd_lastDate_lastOrd.jsonl` (e.g. `spy_5_260222_1_260225_42.jsonl`) containing all vector records for that ticker+tf.
+- **Per raw file:** One **classified** JSONL file with one record per bar. Each record k = feature vector computed on bars [0..k] (expanding window; bar k is the closing bar). Same 33 features as in `doc/Intraday_Vector_Classification_Summary.md`, plus 5 scoring attributes from `doc/Vector_Scoring_Exact_Calc_Spec.md`: profit_score, entry_score, maintain_score, tradeability_score, tier (percentiles within file).
+- **Output:** `classified/` folder adjacent to `raw_vectors`. One file per raw vector: `classified/SPY_260222_5_0935_1022.jsonl` (same stem as raw). Cleared each run.
 
 ### Config & Run
 
@@ -38,11 +39,15 @@ python -m daily_alerts_splitter --alerts-dir /path/to/Alerts
 cd vectorGen
 pip install -r requirements.txt
 
-# Compute features from raw_vectors (clears vector/ each run)
-python -m vector_calc --raw-dir /Users/ihadas/Fin/Data/raw_vectors
+# Compute classified records from raw_vectors (clears classified/ each run)
+python -m vector_calc --raw-dir /path/to/raw_vectors
 # or:
-RAW_VECTORS_DIR=/Users/ihadas/Fin/Data/raw_vectors python -m vector_calc
+RAW_VECTORS_DIR=/path/to/raw_vectors python -m vector_calc
 ```
+
+### Output format
+
+Each record has: identity (closing_bar_index, segment_id, ticker, tf, date, start_time, duration_min, bars), the 33 feature attributes, and 5 scoring attributes (profit_score, entry_score, maintain_score, tradeability_score, tier). All floats rounded to 3 decimals.
 
 ### Files with tf=D
 

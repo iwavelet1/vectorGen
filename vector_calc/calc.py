@@ -38,13 +38,26 @@ def _parse_time(s: str) -> datetime | None:
         return None
 
 
+def _parse_time_series(series: pd.Series) -> pd.Series:
+    """Parse time strings (e.g. '2026-02-24 09:30:00 EST') using first 19 chars -> %Y-%m-%d %H:%M:%S."""
+    def parse(s):
+        if pd.isna(s) or not isinstance(s, str):
+            return pd.NaT
+        s = s.strip()[:19]
+        try:
+            return pd.Timestamp(s)
+        except Exception:
+            return pd.NaT
+    return series.map(parse)
+
+
 def load_segment(path: Path) -> pd.DataFrame:
     """Load one raw_vectors JSONL file into a DataFrame sorted by time."""
     if not path.is_file():
         return pd.DataFrame()
     df = pd.read_json(path, lines=True)
     if "time" in df.columns:
-        dt = pd.to_datetime(df["time"], errors="coerce")
+        dt = _parse_time_series(df["time"])
         df = df.assign(_dt=dt).sort_values("_dt").drop(columns=["_dt"])
     return df.reset_index(drop=True)
 
@@ -57,21 +70,52 @@ def _identity_features(df: pd.DataFrame, vkey: VectorKey) -> dict:
     n = len(df)
     if n == 0:
         return {}
-    dt = pd.to_datetime(df["time"], errors="coerce") if "time" in df.columns else None
-    if dt is not None and not dt.isna().all():
+    start_time = str(df["time"].iloc[0]) if "time" in df.columns else ""
+    dt = _parse_time_series(df["time"]) if "time" in df.columns else pd.Series(dtype=object)
+    if len(dt) and not dt.isna().all():
         t0 = dt.iloc[0]
         t1 = dt.iloc[-1]
         duration_min = (t1 - t0).total_seconds() / 60 if pd.notna(t0) and pd.notna(t1) else math.nan
-        start_time = str(df["time"].iloc[0])
     else:
         duration_min = math.nan
-        start_time = ""
     return {
         "vector_id": vkey.vector_id,
         "ticker": vkey.ticker,
         "tf": vkey.tf,
         "date": vkey.date,
         "ordinal": vkey.ordinal,
+        "start_time": start_time,
+        "duration_min": duration_min,
+        "bars": n,
+    }
+
+
+def _identity_prefix(
+    df: pd.DataFrame,
+    closing_bar_index: int,
+    ticker: str,
+    tf: str,
+    date: str,
+    segment_id: str,
+) -> dict:
+    """Identity fields for one record: prefix [0..closing_bar_index] as the vector."""
+    n = len(df)
+    if n == 0:
+        return {}
+    start_time = str(df["time"].iloc[0]) if "time" in df.columns else ""
+    dt = _parse_time_series(df["time"]) if "time" in df.columns else pd.Series(dtype=object)
+    if len(dt) and not dt.isna().all():
+        t0 = dt.iloc[0]
+        t1 = dt.iloc[-1]
+        duration_min = (t1 - t0).total_seconds() / 60 if pd.notna(t0) and pd.notna(t1) else math.nan
+    else:
+        duration_min = math.nan
+    return {
+        "closing_bar_index": closing_bar_index,
+        "segment_id": segment_id,
+        "ticker": ticker,
+        "tf": tf,
+        "date": date,
         "start_time": start_time,
         "duration_min": duration_min,
         "bars": n,
@@ -88,8 +132,8 @@ def _geometry_features(df: pd.DataFrame) -> dict:
     p1 = float(close.iloc[-1])
     delta_d = p1 - p0
     delta_pct = (delta_d / p0 * 100.0) if p0 != 0 else math.nan
-    dt = pd.to_datetime(df["time"], errors="coerce") if "time" in df.columns else None
-    if dt is not None and not dt.isna().all():
+    dt = _parse_time_series(df["time"]) if "time" in df.columns else pd.Series(dtype=object)
+    if len(dt) and not dt.isna().all():
         duration_min = (dt.iloc[-1] - dt.iloc[0]).total_seconds() / 60
     else:
         duration_min = math.nan
@@ -297,6 +341,106 @@ def compute_vector_features(df: pd.DataFrame, vkey: VectorKey) -> dict:
     features.update(_htf_vwap_features(df))
     base.update(features)
     return base
+
+
+def compute_records_for_segment(
+    df: pd.DataFrame,
+    ticker: str,
+    tf: str,
+    date: str,
+    segment_id: str,
+) -> List[dict]:
+    """One record per closing bar: record k = features on bars [0..k] (expanding window)."""
+    if df.empty:
+        return []
+    records = []
+    for k in range(len(df)):
+        prefix = df.iloc[0 : k + 1]
+        base = _identity_prefix(prefix, k, ticker, tf, date, segment_id)
+        if not base:
+            continue
+        base.update(_geometry_features(prefix))
+        base.update(_volume_features(prefix))
+        base.update(_atr_features(prefix))
+        base.update(_trend_shock_regime_features(prefix))
+        base.update(_avwap_features(prefix))
+        base.update(_htf_vwap_features(prefix))
+        records.append(base)
+    return records
+
+
+def _percentile_rank(values: List[float], x: float) -> float:
+    """Percentile rank of x in values (0-100). NaN in x -> 50; NaNs in values excluded."""
+    if not values:
+        return 50.0
+    if math.isnan(x) if isinstance(x, float) else (x is None):
+        return 50.0
+    finite = [v for v in values if isinstance(v, (int, float)) and math.isfinite(v)]
+    if not finite:
+        return 50.0
+    n = len(finite)
+    leq = sum(1 for v in finite if v <= x)
+    return 100.0 * leq / n
+
+
+def add_scoring_to_records(records: List[dict]) -> None:
+    """Add profit_score, entry_score, maintain_score, tradeability_score, tier (in-place)."""
+    if not records:
+        return
+    # Profit score per record (no percentile)
+    for r in records:
+        d = r.get("delta_pct")
+        if d is not None and isinstance(d, (int, float)) and math.isfinite(d):
+            r["profit_score"] = min(100.0, abs(float(d)) * 20.0)
+        else:
+            r["profit_score"] = math.nan
+    # Entry score: percentiles within file
+    slope_vals = [abs(r.get("slope_pctPerMin") or 0) for r in records]
+    trend_frac_vals = [r.get("tTrendAbs_active_frac") for r in records]
+    trend_area_vals = [r.get("inTrendScore_area") for r in records]
+    cross_vals = [r.get("rev_avwap_cross_count") for r in records]
+    for r in records:
+        p_slope = _percentile_rank(slope_vals, abs(r.get("slope_pctPerMin") or 0))
+        p_trend_frac = _percentile_rank(trend_frac_vals, r.get("tTrendAbs_active_frac"))
+        p_trend_area = _percentile_rank(trend_area_vals, r.get("inTrendScore_area"))
+        p_cross_inv = 100.0 - _percentile_rank(cross_vals, r.get("rev_avwap_cross_count"))
+        r["entry_score"] = 0.35 * p_slope + 0.25 * p_trend_frac + 0.20 * p_trend_area + 0.20 * p_cross_inv
+    # Maintain score: percentiles within file
+    eff_vals = [r.get("efficiency") for r in records]
+    shock_vals = [r.get("tShockScoreTot_density") for r in records]
+    atr_vals = [r.get("atrRatio_q50") for r in records]
+    for r in records:
+        p_eff = _percentile_rank(eff_vals, r.get("efficiency"))
+        p_shock_inv = 100.0 - _percentile_rank(shock_vals, r.get("tShockScoreTot_density"))
+        p_cross_inv = 100.0 - _percentile_rank(cross_vals, r.get("rev_avwap_cross_count"))
+        p_atr = _percentile_rank(atr_vals, r.get("atrRatio_q50"))
+        stability = 100.0 - 2 * abs(p_atr - 50)
+        r["maintain_score"] = 0.35 * p_eff + 0.25 * p_shock_inv + 0.20 * p_cross_inv + 0.20 * stability
+    # Tradeability and tier
+    for r in records:
+        ps = r.get("profit_score") or 0
+        es = r.get("entry_score") or 0
+        ms = r.get("maintain_score") or 0
+        if math.isfinite(ps) and math.isfinite(es) and math.isfinite(ms):
+            r["tradeability_score"] = 0.40 * ps + 0.30 * es + 0.30 * ms
+        else:
+            r["tradeability_score"] = math.nan
+        ts = r.get("tradeability_score")
+        if ts is not None and math.isfinite(ts):
+            if ts >= 85:
+                r["tier"] = "elite"
+            elif ts >= 70:
+                r["tier"] = "high_quality"
+            elif ts >= 55:
+                r["tier"] = "tradable"
+            elif ts >= 40:
+                r["tier"] = "difficult"
+            elif ts >= 25:
+                r["tier"] = "low_edge"
+            else:
+                r["tier"] = "non_tradable"
+        else:
+            r["tier"] = "non_tradable"
 
 
 def parse_raw_filename(path: Path) -> Tuple[str, str, str, str, str]:

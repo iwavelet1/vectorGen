@@ -16,6 +16,11 @@ def main() -> None:
         default=DEFAULT_ALERTS,
         help="Path to alerts folder (or set ALERTS_DIR)",
     )
+    p.add_argument(
+        "--date",
+        default="",
+        help="Process only this YYMMDD; if set, only remove raw_vectors for this date and only process matching alert files.",
+    )
     args = p.parse_args()
     if not args.alerts_dir:
         p.error("Set --alerts-dir or ALERTS_DIR")
@@ -24,15 +29,25 @@ def main() -> None:
         print(f"Alerts dir not found: {alerts_dir}", file=sys.stderr)
         sys.exit(1)
     raw_vectors_dir = alerts_dir.parent / "raw_vectors"
-    # Clean raw_vectors
+    date_filter = args.date.strip() if args.date else None
+
     if raw_vectors_dir.exists():
-        for f in raw_vectors_dir.iterdir():
-            if f.is_file():
-                f.unlink()
+        if date_filter:
+            for f in raw_vectors_dir.iterdir():
+                if f.is_file() and (f"_{date_filter}_" in f.stem or f.stem.endswith(f"_{date_filter}")):
+                    f.unlink()
+        else:
+            for f in raw_vectors_dir.iterdir():
+                if f.is_file():
+                    f.unlink()
     else:
         raw_vectors_dir.mkdir(parents=True, exist_ok=True)
+
+    alert_files = sorted(alerts_dir.glob("*.json"))
+    if date_filter:
+        alert_files = [p for p in alert_files if f"_{date_filter}" in p.stem or p.stem.endswith(f"_{date_filter}")]
     total = 0
-    for path in sorted(alerts_dir.glob("*.json")):
+    for path in alert_files:
         written = run_file(path, raw_vectors_dir, path.stem)
         total += len(written)
         if written:
