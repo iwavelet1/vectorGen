@@ -262,6 +262,38 @@ function getAlertsBars(asset, date, tf, startHm, endHm) {
   return { bars, file: path.basename(fp) };
 }
 
+function getRawVectorBars(asset, date, tf) {
+  const bars = [];
+  const dirs = getDirsForKind("raw_vectors");
+  if (!asset || !date || !tf || !dirs.length) return bars;
+  const prefix = asset + "_" + date + "_" + tf + "_";
+  for (const dir of dirs) {
+    if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) continue;
+    const names = fs.readdirSync(dir).filter((f) => (f.endsWith(".json") || f.endsWith(".jsonl")) && f.startsWith(prefix));
+    for (const name of names.sort()) {
+      const fp = path.join(dir, name);
+      if (!fs.statSync(fp).isFile()) continue;
+      let content;
+      try {
+        content = fs.readFileSync(fp, "utf8");
+      } catch {
+        continue;
+      }
+      const lines = content.split("\n").filter((line) => line.trim().length > 0);
+      for (const line of lines) {
+        let rec;
+        try {
+          rec = JSON.parse(line);
+        } catch {
+          continue;
+        }
+        bars.push(rec);
+      }
+    }
+  }
+  return bars;
+}
+
 function getClassifiedRecords(asset, date, tf, startHm, endHm) {
   const records = [];
   if (!asset || !date || !tf) return { records, files: [] };
@@ -327,6 +359,7 @@ function getPlotVectors(asset, date, tf) {
     const startMin = parseStartTimeToMin(startTime);
     if (startMin == null || typeof durationMin !== "number" || !Number.isFinite(p0) || !Number.isFinite(p1)) continue;
     const endMin = startMin + durationMin;
+    const tier = lastRec.tier != null ? lastRec.tier : "";
     segments.push({
       segment_id: lastRec.segment_id || f.replace(/\.jsonl$/, ""),
       start_min: startMin,
@@ -335,10 +368,57 @@ function getPlotVectors(asset, date, tf) {
       end_hm: String(Math.floor(endMin / 60)).padStart(2, "0") + ":" + String(endMin % 60).padStart(2, "0"),
       close_first: p0,
       close_last: p1,
+      tier: tier,
     });
   }
   segments.sort((a, b) => a.start_min - b.start_min);
-  return { segments, barsInDay, sessionStartMin: SESSION_START_MIN, sessionEndMin: SESSION_END_MIN };
+
+  const rev_avwap_series = [];
+  const alertRes = getAlertsBars(asset, date, tf, null, null);
+  if (alertRes.bars && alertRes.bars.length > 0) {
+    for (const b of alertRes.bars) {
+      const t = b.time || b.Time;
+      const barMin = t ? parseStartTimeToMin(t) : null;
+      const v = b.REV_avwap;
+      if (barMin != null && v != null && Number.isFinite(Number(v))) {
+        rev_avwap_series.push({ min: barMin, value: Number(v) });
+      }
+    }
+    rev_avwap_series.sort((a, b) => a.min - b.min);
+  }
+
+  const htf_vwap_series = [];
+  const atrnow_upper_series = [];
+  const atrnow_lower_series = [];
+  const rawBars = getRawVectorBars(asset, date, tf);
+  for (const b of rawBars) {
+    const t = b.time || b.Time;
+    const barMin = t ? parseStartTimeToMin(t) : null;
+    if (barMin == null) continue;
+    const htf = b.htfVwap != null ? Number(b.htfVwap) : NaN;
+    const atr = b.atrNow != null ? Number(b.atrNow) : (b.atrnow != null ? Number(b.atrnow) : NaN);
+    if (Number.isFinite(htf)) {
+      htf_vwap_series.push({ min: barMin, value: htf });
+      if (Number.isFinite(atr)) {
+        atrnow_upper_series.push({ min: barMin, value: htf + atr });
+        atrnow_lower_series.push({ min: barMin, value: htf - atr });
+      }
+    }
+  }
+  htf_vwap_series.sort((a, b) => a.min - b.min);
+  atrnow_upper_series.sort((a, b) => a.min - b.min);
+  atrnow_lower_series.sort((a, b) => a.min - b.min);
+
+  return {
+    segments,
+    barsInDay,
+    sessionStartMin: SESSION_START_MIN,
+    sessionEndMin: SESSION_END_MIN,
+    rev_avwap_series,
+    htf_vwap_series,
+    atrnow_upper_series,
+    atrnow_lower_series,
+  };
 }
 
 function serveFile(filePath, res) {

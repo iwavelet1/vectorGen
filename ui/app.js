@@ -273,6 +273,10 @@
     const tfMin = tfMinutesFromData(data);
     const barsInDay = Math.floor(sessionLenMin / tfMin) || 108;
     const segments = data.segments || [];
+    const revAvwapSeries = data.rev_avwap_series || [];
+    const htfVwapSeries = data.htf_vwap_series || [];
+    const atrnowUpperSeries = data.atrnow_upper_series || [];
+    const atrnowLowerSeries = data.atrnow_lower_series || [];
     const padding = { top: 24, right: 20, bottom: 52, left: 54 };
     const w = plotCanvas.width;
     const h = plotCanvas.height;
@@ -285,11 +289,33 @@
     const circleRadius = 6;
     const hitRadius = 10;
 
+    const TIER_COLORS = {
+      "1": "#1565C0", "2": "#2E7D32", "3": "#E65100", "4": "#C62828",
+      "A": "#1565C0", "B": "#2E7D32", "C": "#E65100", "D": "#C62828",
+      "elite": "#1565C0", "high_quality": "#2E7D32", "tradable": "#E65100",
+      "difficult": "#C62828", "low_edge": "#7B1FA2", "non_tradable": "#455A64"
+    };
+    const REV_AVWAP_COLOR = "#cc00cc";
+    const HTF_VWAP_COLOR = "#0d47a1";
+    const ATRNOW_BAND_COLOR = "#1976d2";
+
     let minP = Infinity;
     let maxP = -Infinity;
     segments.forEach(function (s) {
       if (s.close_first != null && Number.isFinite(s.close_first)) { minP = Math.min(minP, s.close_first); maxP = Math.max(maxP, s.close_first); }
       if (s.close_last != null && Number.isFinite(s.close_last)) { minP = Math.min(minP, s.close_last); maxP = Math.max(maxP, s.close_last); }
+    });
+    revAvwapSeries.forEach(function (p) {
+      if (p.value != null && Number.isFinite(p.value)) { minP = Math.min(minP, p.value); maxP = Math.max(maxP, p.value); }
+    });
+    htfVwapSeries.forEach(function (p) {
+      if (p.value != null && Number.isFinite(p.value)) { minP = Math.min(minP, p.value); maxP = Math.max(maxP, p.value); }
+    });
+    atrnowUpperSeries.forEach(function (p) {
+      if (p.value != null && Number.isFinite(p.value)) { minP = Math.min(minP, p.value); maxP = Math.max(maxP, p.value); }
+    });
+    atrnowLowerSeries.forEach(function (p) {
+      if (p.value != null && Number.isFinite(p.value)) { minP = Math.min(minP, p.value); maxP = Math.max(maxP, p.value); }
     });
     if (minP === Infinity) minP = 0;
     if (maxP <= minP) maxP = minP + 1;
@@ -329,7 +355,8 @@
       const x2 = xFromMin(s.end_min);
       const y1 = yFromPrice(s.close_first);
       const y2 = yFromPrice(s.close_last);
-      ctx.strokeStyle = "#0d47a1";
+      const tierKey = String(s.tier != null ? s.tier : "");
+      ctx.strokeStyle = TIER_COLORS[tierKey] || "#333333";
       ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.moveTo(x1, y1);
@@ -337,12 +364,64 @@
       ctx.stroke();
     });
 
+    if (revAvwapSeries.length > 0) {
+      ctx.strokeStyle = REV_AVWAP_COLOR;
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      var first = true;
+      revAvwapSeries.forEach(function (p) {
+        var x = xFromMin(p.min);
+        var y = yFromPrice(p.value);
+        if (first) { ctx.moveTo(x, y); first = false; } else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    if (atrnowUpperSeries.length > 0 && atrnowLowerSeries.length > 0) {
+      ctx.strokeStyle = ATRNOW_BAND_COLOR;
+      ctx.lineWidth = 1;
+      ctx.setLineDash([2, 2]);
+      ctx.beginPath();
+      var first = true;
+      atrnowUpperSeries.forEach(function (p) {
+        var x = xFromMin(p.min);
+        var y = yFromPrice(p.value);
+        if (first) { ctx.moveTo(x, y); first = false; } else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+      ctx.beginPath();
+      first = true;
+      atrnowLowerSeries.forEach(function (p) {
+        var x = xFromMin(p.min);
+        var y = yFromPrice(p.value);
+        if (first) { ctx.moveTo(x, y); first = false; } else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    if (htfVwapSeries.length > 0) {
+      ctx.strokeStyle = HTF_VWAP_COLOR;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      var first = true;
+      htfVwapSeries.forEach(function (p) {
+        var x = xFromMin(p.min);
+        var y = yFromPrice(p.value);
+        if (first) { ctx.moveTo(x, y); first = false; } else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+    }
+
     segments.forEach(function (s) {
       const x1 = xFromMin(s.start_min);
       const x2 = xFromMin(s.end_min);
       const y1 = yFromPrice(s.close_first);
       const y2 = yFromPrice(s.close_last);
       const isPeak = s.close_first > s.close_last;
+      const tierKey = String(s.tier != null ? s.tier : "");
       plotCircles.push({ x: x1, y: y1, segment_id: s.segment_id, type: "start", time_hm: s.start_hm, price: s.close_first, peak: isPeak });
       plotCircles.push({ x: x2, y: y2, segment_id: s.segment_id, type: "end", time_hm: s.end_hm, price: s.close_last, peak: !isPeak });
     });
@@ -352,7 +431,8 @@
       const x2 = xFromMin(s.end_min);
       const y1 = yFromPrice(s.close_first);
       const y2 = yFromPrice(s.close_last);
-      ctx.fillStyle = "#0d47a1";
+      const tierKey = String(s.tier != null ? s.tier : "");
+      ctx.fillStyle = TIER_COLORS[tierKey] || "#333333";
       ctx.strokeStyle = "#fff";
       ctx.lineWidth = 1.5;
       [ [x1, y1, s.close_first], [x2, y2, s.close_last] ].forEach(function (xy) {
@@ -399,6 +479,67 @@
       ctx.fillText(p.toFixed(2), plotLeft - 6, y);
     }
     ctx.textBaseline = "alphabetic";
+
+    var legendY = plotTop + 10;
+    var legendX = plotRight - 10;
+    ctx.textAlign = "right";
+    ctx.font = "11px system-ui, sans-serif";
+    if (revAvwapSeries.length > 0) {
+      ctx.strokeStyle = REV_AVWAP_COLOR;
+      ctx.setLineDash([4, 4]);
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(legendX - 40, legendY);
+      ctx.lineTo(legendX - 10, legendY);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = "#333";
+      ctx.fillText("REV_avwap", legendX, legendY + 4);
+      legendY += 18;
+    }
+    if (htfVwapSeries.length > 0) {
+      ctx.strokeStyle = HTF_VWAP_COLOR;
+      ctx.setLineDash([]);
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(legendX - 40, legendY);
+      ctx.lineTo(legendX - 10, legendY);
+      ctx.stroke();
+      ctx.fillStyle = "#333";
+      ctx.fillText("htfVwap", legendX, legendY + 4);
+      legendY += 18;
+    }
+    if (atrnowUpperSeries.length > 0) {
+      ctx.strokeStyle = ATRNOW_BAND_COLOR;
+      ctx.setLineDash([2, 2]);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(legendX - 40, legendY);
+      ctx.lineTo(legendX - 10, legendY);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = "#333";
+      ctx.fillText("±atrnow", legendX, legendY + 4);
+      legendY += 18;
+    }
+    var tierOrder = ["elite", "high_quality", "tradable", "difficult", "low_edge", "non_tradable"];
+    var ballRadius = 6;
+    var ballX = legendX - 16;
+    var textX = legendX - 28;
+    tierOrder.forEach(function (t) {
+      var label = t === "" ? "—" : "Tier " + t;
+      var ballY = legendY;
+      ctx.beginPath();
+      ctx.arc(ballX, ballY, ballRadius, 0, Math.PI * 2);
+      ctx.fillStyle = TIER_COLORS[t] || "#333333";
+      ctx.fill();
+      ctx.strokeStyle = "#fff";
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.fillStyle = "#333";
+      ctx.fillText(label, textX, legendY + 4);
+      legendY += 18;
+    });
 
     plotBounds = { plotLeft: plotLeft, plotRight: plotRight, plotTop: plotTop, plotBottom: plotBottom };
   }

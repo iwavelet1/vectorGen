@@ -384,58 +384,76 @@ def _percentile_rank(values: List[float], x: float) -> float:
 
 
 def add_scoring_to_records(records: List[dict]) -> None:
-    """Add profit_score, entry_score, maintain_score, tradeability_score, tier (in-place)."""
+    """Add profit_score, entry_score, maintain_score, tradeability_score, tier (in-place).
+
+    Scoring uses an expanding-window percentile: bar k is ranked only against
+    records [0..k], so no look-ahead bias is introduced.
+    """
     if not records:
         return
-    # Profit score per record (no percentile)
+    abs_delta_pct_vals: List[float] = []
+    slope_vals: List[float] = []
+    trend_frac_vals: List[float] = []
+    trend_area_vals: List[float] = []
+    cross_vals: List[float] = []
+    eff_vals: List[float] = []
+    shock_vals: List[float] = []
+    atr_vals: List[float] = []
+    tradeability_vals: List[float] = []
+
     for r in records:
+        # Profit score: percentile rank of abs(delta_pct) within [0..k]
         d = r.get("delta_pct")
-        if d is not None and isinstance(d, (int, float)) and math.isfinite(d):
-            r["profit_score"] = min(100.0, abs(float(d)) * 20.0)
-        else:
-            r["profit_score"] = math.nan
-    # Entry score: percentiles within file
-    slope_vals = [abs(r.get("slope_pctPerMin") or 0) for r in records]
-    trend_frac_vals = [r.get("tTrendAbs_active_frac") for r in records]
-    trend_area_vals = [r.get("inTrendScore_area") for r in records]
-    cross_vals = [r.get("rev_avwap_cross_count") for r in records]
-    for r in records:
+        abs_d = abs(float(d)) if d is not None and isinstance(d, (int, float)) and math.isfinite(d) else math.nan
+        abs_delta_pct_vals.append(abs_d)
+        r["profit_score"] = _percentile_rank(abs_delta_pct_vals, abs_d) if math.isfinite(abs_d) else math.nan
+
+        # Grow pools to include bar k before ranking (self-inclusive, honest)
+        slope_vals.append(abs(r.get("slope_pctPerMin") or 0))
+        trend_frac_vals.append(r.get("tTrendAbs_active_frac"))
+        trend_area_vals.append(r.get("inTrendScore_area"))
+        cross_vals.append(r.get("rev_avwap_cross_count"))
+        eff_vals.append(r.get("efficiency"))
+        shock_vals.append(r.get("tShockScoreTot_density"))
+        atr_vals.append(r.get("atrRatio_q50"))
+
+        # Entry score: rank within [0..k]
         p_slope = _percentile_rank(slope_vals, abs(r.get("slope_pctPerMin") or 0))
         p_trend_frac = _percentile_rank(trend_frac_vals, r.get("tTrendAbs_active_frac"))
         p_trend_area = _percentile_rank(trend_area_vals, r.get("inTrendScore_area"))
         p_cross_inv = 100.0 - _percentile_rank(cross_vals, r.get("rev_avwap_cross_count"))
         r["entry_score"] = 0.35 * p_slope + 0.25 * p_trend_frac + 0.20 * p_trend_area + 0.20 * p_cross_inv
-    # Maintain score: percentiles within file
-    eff_vals = [r.get("efficiency") for r in records]
-    shock_vals = [r.get("tShockScoreTot_density") for r in records]
-    atr_vals = [r.get("atrRatio_q50") for r in records]
-    for r in records:
+
+        # Maintain score: rank within [0..k]
         p_eff = _percentile_rank(eff_vals, r.get("efficiency"))
         p_shock_inv = 100.0 - _percentile_rank(shock_vals, r.get("tShockScoreTot_density"))
-        p_cross_inv = 100.0 - _percentile_rank(cross_vals, r.get("rev_avwap_cross_count"))
+        p_cross_inv2 = 100.0 - _percentile_rank(cross_vals, r.get("rev_avwap_cross_count"))
         p_atr = _percentile_rank(atr_vals, r.get("atrRatio_q50"))
         stability = 100.0 - 2 * abs(p_atr - 50)
-        r["maintain_score"] = 0.35 * p_eff + 0.25 * p_shock_inv + 0.20 * p_cross_inv + 0.20 * stability
-    # Tradeability and tier
-    for r in records:
+        r["maintain_score"] = 0.35 * p_eff + 0.25 * p_shock_inv + 0.20 * p_cross_inv2 + 0.20 * stability
+
+        # Tradeability and tier
         ps = r.get("profit_score") or 0
         es = r.get("entry_score") or 0
         ms = r.get("maintain_score") or 0
-        if math.isfinite(ps) and math.isfinite(es) and math.isfinite(ms):
-            r["tradeability_score"] = 0.40 * ps + 0.30 * es + 0.30 * ms
-        else:
-            r["tradeability_score"] = math.nan
+        r["tradeability_score"] = (
+            0.40 * ps + 0.30 * es + 0.30 * ms
+            if math.isfinite(ps) and math.isfinite(es) and math.isfinite(ms)
+            else math.nan
+        )
         ts = r.get("tradeability_score")
         if ts is not None and math.isfinite(ts):
-            if ts >= 85:
+            tradeability_vals.append(ts)
+            tier_pct = _percentile_rank(tradeability_vals, ts)
+            if tier_pct >= 85:
                 r["tier"] = "elite"
-            elif ts >= 70:
+            elif tier_pct >= 70:
                 r["tier"] = "high_quality"
-            elif ts >= 55:
+            elif tier_pct >= 55:
                 r["tier"] = "tradable"
-            elif ts >= 40:
+            elif tier_pct >= 40:
                 r["tier"] = "difficult"
-            elif ts >= 25:
+            elif tier_pct >= 25:
                 r["tier"] = "low_edge"
             else:
                 r["tier"] = "non_tradable"
