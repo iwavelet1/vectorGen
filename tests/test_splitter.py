@@ -162,7 +162,7 @@ class TestLoadBarsAndRunFile(unittest.TestCase):
             alerts_dir = Path(d) / "alerts"
             alerts_dir.mkdir()
             raw_dir = Path(d) / "raw_vectors"
-            # One alert file with two edges -> two segments (edge 0 to edge 1, edge 1 to end)
+            # One segment: revDir 1 -> -1 (closing edge is opposite of start)
             alert_path = alerts_dir / "SPY_260222_5.json"
             alert_path.write_text(
                 '{"time":"2026-02-22 09:30:00 UTC","bar_index":1,"revDir":1,"REV_avwap":100.0}\n'
@@ -170,9 +170,9 @@ class TestLoadBarsAndRunFile(unittest.TestCase):
                 '{"time":"2026-02-22 09:40:00 UTC","bar_index":3,"revDir":-1,"REV_avwap":102.0}\n'
             )
             written = run_file(alert_path, raw_dir, "SPY_260222_5")
-            self.assertEqual(len(written), 2)
+            self.assertEqual(len(written), 2)  # segment 1→-1 (3 bars) + tail from closing bar to end (1 bar)
             self.assertTrue(written[0].name.startswith("SPY_260222_5_"))
-            self.assertTrue(written[0].name.endswith(".json"))
+            self.assertTrue(written[0].name.endswith(".jsonl"))
             content0 = written[0].read_text()
             self.assertEqual(content0.count("\n"), 3)
 

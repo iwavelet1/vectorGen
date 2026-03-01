@@ -383,15 +383,38 @@ def _percentile_rank(values: List[float], x: float) -> float:
     return 100.0 * leq / n
 
 
+# Profit thresholds based on $500 trade unit.
+# $7 min profit  -> 1.4% delta; below this is not worth trading.
+# $25 best profit -> 5.0% delta; at or above this scores 100.
+PROFIT_MIN_PCT: float = 1.4
+PROFIT_TARGET_PCT: float = 5.0
+# Minimum bars for a vector to be tradable.
+MIN_TRADABLE_BARS: int = 1  # 1 bar = non_tradable via bars_factor; 4+ bars = full score.
+
+
+def _profit_score_from_delta(abs_d: float) -> float:
+    """Score 0-100 for abs(delta_pct) against trade-unit thresholds.
+    <1.4% -> 0, >=5.0% -> 100, linear between.
+    """
+    if not math.isfinite(abs_d) or abs_d < PROFIT_MIN_PCT:
+        return 0.0
+    return min(100.0, (abs_d - PROFIT_MIN_PCT) / (PROFIT_TARGET_PCT - PROFIT_MIN_PCT) * 100.0)
+
+
 def add_scoring_to_records(records: List[dict]) -> None:
     """Add profit_score, entry_score, maintain_score, tradeability_score, tier (in-place).
 
-    Scoring uses an expanding-window percentile: bar k is ranked only against
-    records [0..k], so no look-ahead bias is introduced.
+    profit_score: absolute scale against $500 trade unit ($7 min, $25 target).
+    entry/maintain: expanding-window percentile (bar k ranked against [0..k]).
+    tier: from percentile of (tradeability_score * bars_factor):
+      - bars=1 -> factor 0.0 (non_tradable)
+      - bars=2 -> factor ~0.33
+      - bars=3 -> factor ~0.67
+      - bars>=4 -> factor 1.0 (full score)
+    Hard non_tradable guards: bars=1 OR |delta_pct| < 1.4%.
     """
     if not records:
         return
-    abs_delta_pct_vals: List[float] = []
     slope_vals: List[float] = []
     trend_frac_vals: List[float] = []
     trend_area_vals: List[float] = []
@@ -402,13 +425,12 @@ def add_scoring_to_records(records: List[dict]) -> None:
     tradeability_vals: List[float] = []
 
     for r in records:
-        # Profit score: percentile rank of abs(delta_pct) within [0..k]
+        # Profit score: absolute scale against $500 trade unit thresholds.
         d = r.get("delta_pct")
         abs_d = abs(float(d)) if d is not None and isinstance(d, (int, float)) and math.isfinite(d) else math.nan
-        abs_delta_pct_vals.append(abs_d)
-        r["profit_score"] = _percentile_rank(abs_delta_pct_vals, abs_d) if math.isfinite(abs_d) else math.nan
+        r["profit_score"] = _profit_score_from_delta(abs_d)
 
-        # Grow pools to include bar k before ranking (self-inclusive, honest)
+        # Grow pools to include bar k before ranking (self-inclusive, honest).
         slope_vals.append(abs(r.get("slope_pctPerMin") or 0))
         trend_frac_vals.append(r.get("tTrendAbs_active_frac"))
         trend_area_vals.append(r.get("inTrendScore_area"))
@@ -417,14 +439,14 @@ def add_scoring_to_records(records: List[dict]) -> None:
         shock_vals.append(r.get("tShockScoreTot_density"))
         atr_vals.append(r.get("atrRatio_q50"))
 
-        # Entry score: rank within [0..k]
+        # Entry score: rank within [0..k].
         p_slope = _percentile_rank(slope_vals, abs(r.get("slope_pctPerMin") or 0))
         p_trend_frac = _percentile_rank(trend_frac_vals, r.get("tTrendAbs_active_frac"))
         p_trend_area = _percentile_rank(trend_area_vals, r.get("inTrendScore_area"))
         p_cross_inv = 100.0 - _percentile_rank(cross_vals, r.get("rev_avwap_cross_count"))
         r["entry_score"] = 0.35 * p_slope + 0.25 * p_trend_frac + 0.20 * p_trend_area + 0.20 * p_cross_inv
 
-        # Maintain score: rank within [0..k]
+        # Maintain score: rank within [0..k].
         p_eff = _percentile_rank(eff_vals, r.get("efficiency"))
         p_shock_inv = 100.0 - _percentile_rank(shock_vals, r.get("tShockScoreTot_density"))
         p_cross_inv2 = 100.0 - _percentile_rank(cross_vals, r.get("rev_avwap_cross_count"))
@@ -432,7 +454,7 @@ def add_scoring_to_records(records: List[dict]) -> None:
         stability = 100.0 - 2 * abs(p_atr - 50)
         r["maintain_score"] = 0.35 * p_eff + 0.25 * p_shock_inv + 0.20 * p_cross_inv2 + 0.20 * stability
 
-        # Tradeability and tier
+        # Tradeability score.
         ps = r.get("profit_score") or 0
         es = r.get("entry_score") or 0
         ms = r.get("maintain_score") or 0
@@ -441,10 +463,21 @@ def add_scoring_to_records(records: List[dict]) -> None:
             if math.isfinite(ps) and math.isfinite(es) and math.isfinite(ms)
             else math.nan
         )
+
+        # Hard non_tradable guards: 1 bar, or profit below minimum threshold.
+        bars = r.get("bars", 0)
+        if bars <= 1 or (math.isfinite(abs_d) and abs_d < PROFIT_MIN_PCT):
+            r["tier"] = "non_tradable"
+            continue
+
+        # bars_factor: 1->0, 2->0.33, 3->0.67, 4+->1.0
+        bars_factor = min(1.0, (bars - 1) / 3.0)
+
         ts = r.get("tradeability_score")
         if ts is not None and math.isfinite(ts):
-            tradeability_vals.append(ts)
-            tier_pct = _percentile_rank(tradeability_vals, ts)
+            adjusted_ts = ts * bars_factor
+            tradeability_vals.append(adjusted_ts)
+            tier_pct = _percentile_rank(tradeability_vals, adjusted_ts)
             if tier_pct >= 85:
                 r["tier"] = "elite"
             elif tier_pct >= 70:
@@ -464,19 +497,13 @@ def add_scoring_to_records(records: List[dict]) -> None:
 def parse_raw_filename(path: Path) -> Tuple[str, str, str, str, str]:
     """Parse raw vector filename -> (ticker, date, tf, start_hhmm, end_hhmm).
 
-    Supports:
-    - TICKER_YYMMDD_TF_START_END (e.g. SPY_260222_5_0935_1022)
-    - TICKER_YYMMDD_START_END    (e.g. BOIL_260223_1450_1510) -> tf = \"D\" (daily)
+    Only TICKER_YYMMDD_TF_START_END (5 parts), e.g. SPY_260222_5_0935_1022.
     """
     stem = path.stem
     parts = stem.split("_")
-    if len(parts) == 5:
-        ticker, date, tf, start_hhmm, end_hhmm = parts
-    elif len(parts) == 4:
-        ticker, date, start_hhmm, end_hhmm = parts
-        tf = "D"
-    else:
-        raise ValueError(f"Unexpected raw vector filename: {path.name}")
+    if len(parts) != 5:
+        raise ValueError(f"Raw vector filename must have 5 parts (ticker_date_tf_start_end): {path.name}")
+    ticker, date, tf, start_hhmm, end_hhmm = parts
     return ticker, date, tf, start_hhmm, end_hhmm
 
 

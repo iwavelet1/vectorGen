@@ -63,16 +63,35 @@ def edge_indices(bars: list[dict]) -> list[int]:
 
 
 def segments_from_edges(bars: list[dict], edge_ix: list[int]) -> list[list[dict]]:
-    """Build segments: segment k = bars from edge_ix[k] through edge_ix[k+1] inclusive.
-    So each edge bar appears as end of one segment and start of the next.
+    """Build segments: a segment runs from an edge bar until the next edge where
+    revDir != 0 and revDir != starting revDir (closing edge). If revDir == start_dir
+    it is the same edge (same direction), so we do not close there.
     """
     if not edge_ix:
         return [bars] if bars else []
     segments = []
-    for k in range(len(edge_ix)):
+    k = 0
+    while k < len(edge_ix):
         start_ix = edge_ix[k]
-        end_ix = edge_ix[k + 1] if k + 1 < len(edge_ix) else len(bars) - 1
+        start_dir = _rev_dir(bars[start_ix])
+        end_ix = start_ix
+        for j in range(k + 1, len(edge_ix)):
+            if _rev_dir(bars[edge_ix[j]]) != start_dir:
+                end_ix = edge_ix[j]
+                break
+        else:
+            end_ix = len(bars) - 1
         segments.append(bars[start_ix : end_ix + 1])
+        if end_ix == start_ix:
+            k += 1
+        else:
+            for j in range(k + 1, len(edge_ix)):
+                if edge_ix[j] == end_ix:
+                    k = j
+                    break
+            else:
+                # Ran to end of bars (no opposite edge found); don't start a new segment at next same-dir edge
+                k = len(edge_ix)
     return segments
 
 
@@ -146,7 +165,7 @@ def run_file(alerts_path: Path, raw_vectors_dir: Path, parent_basename: str) -> 
         t1 = _parse_time(seg[-1].get("time"))
         start_hhmm = _time_to_hhmm(t0) if t0 else "0000"
         end_hhmm = _time_to_hhmm(t1) if t1 else "0000"
-        out_name = f"{parent_basename}_{start_hhmm}_{end_hhmm}.json"
+        out_name = f"{parent_basename}_{start_hhmm}_{end_hhmm}.jsonl"
         sanity_check_segment(seg, out_name)
         out_path = raw_vectors_dir / out_name
         with open(out_path, "w", encoding="utf-8") as f:

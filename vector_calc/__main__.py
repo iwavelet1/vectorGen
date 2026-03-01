@@ -109,7 +109,7 @@ def main() -> None:
             if f.is_file():
                 f.unlink()
 
-    raw_paths = sorted(raw_dir.glob("*.json"))
+    raw_paths = sorted(raw_dir.glob("*.jsonl"))
     if date_filter:
         raw_paths = [p for p in raw_paths if f"_{date_filter}_" in p.stem or p.stem.endswith(f"_{date_filter}")]
     if not raw_paths:

@@ -474,13 +474,15 @@ body {
 .plot-wrap {
   position: relative;
   width: 100%;
-  min-height: 500px;
+  min-height: 400px;
+  max-height: calc(100vh - 140px);
 }
 
 .plot-wrap canvas {
   display: block;
   width: 100%;
   height: auto;
+  max-height: 72vh;
   cursor: crosshair;
 }
 

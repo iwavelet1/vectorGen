@@ -266,7 +266,8 @@
 
   function drawVectorsPlot(data, tf) {
     plotCanvas.width = plotWrap.clientWidth;
-    plotCanvas.height = plotWrap.clientHeight || 500;
+    var maxPlotHeight = Math.floor((window.innerHeight - 160) * 0.72);
+    plotCanvas.height = Math.max(400, Math.min(plotWrap.clientHeight || 600, maxPlotHeight));
     const sessionStartMin = data.sessionStartMin != null ? data.sessionStartMin : 8 * 60 + 30;
     const sessionEndMin = data.sessionEndMin != null ? data.sessionEndMin : 17 * 60 + 30;
     const sessionLenMin = sessionEndMin - sessionStartMin;
@@ -277,6 +278,8 @@
     const htfVwapSeries = data.htf_vwap_series || [];
     const atrnowUpperSeries = data.atrnow_upper_series || [];
     const atrnowLowerSeries = data.atrnow_lower_series || [];
+    const plotTrades = data.trades || [];
+    const tradeAvwapSegments = data.trade_avwap_segments || [];
     const padding = { top: 24, right: 20, bottom: 52, left: 54 };
     const w = plotCanvas.width;
     const h = plotCanvas.height;
@@ -316,6 +319,15 @@
     });
     atrnowLowerSeries.forEach(function (p) {
       if (p.value != null && Number.isFinite(p.value)) { minP = Math.min(minP, p.value); maxP = Math.max(maxP, p.value); }
+    });
+    plotTrades.forEach(function (tr) {
+      if (tr.entryPx != null && Number.isFinite(tr.entryPx)) { minP = Math.min(minP, tr.entryPx); maxP = Math.max(maxP, tr.entryPx); }
+      if (tr.exitPx != null && Number.isFinite(tr.exitPx)) { minP = Math.min(minP, tr.exitPx); maxP = Math.max(maxP, tr.exitPx); }
+    });
+    tradeAvwapSegments.forEach(function (seg) {
+      (seg.points || []).forEach(function (p) {
+        if (p.value != null && Number.isFinite(p.value)) { minP = Math.min(minP, p.value); maxP = Math.max(maxP, p.value); }
+      });
     });
     if (minP === Infinity) minP = 0;
     if (maxP <= minP) maxP = minP + 1;
@@ -363,6 +375,22 @@
       ctx.lineTo(x2, y2);
       ctx.stroke();
     });
+    for (var i = 0; i < segments.length - 1; i++) {
+      var cur = segments[i];
+      var next = segments[i + 1];
+      var x0 = xFromMin(cur.end_min);
+      var y0 = yFromPrice(cur.close_last);
+      var x1 = xFromMin(next.start_min);
+      var y1 = yFromPrice(next.close_first);
+      var nextTierKey = String(next.tier != null ? next.tier : "");
+      ctx.strokeStyle = TIER_COLORS[nextTierKey] || "#333333";
+      ctx.lineWidth = 2;
+      ctx.setLineDash([]);
+      ctx.beginPath();
+      ctx.moveTo(x0, y0);
+      ctx.lineTo(x1, y1);
+      ctx.stroke();
+    }
 
     if (revAvwapSeries.length > 0) {
       ctx.strokeStyle = REV_AVWAP_COLOR;
@@ -415,6 +443,20 @@
       ctx.stroke();
     }
 
+    var TRADE_AVWAP_ACTIVE_COLOR = "#e65100";
+    tradeAvwapSegments.forEach(function (seg) {
+      var pts = seg.points || [];
+      if (pts.length === 0) return;
+      ctx.strokeStyle = TRADE_AVWAP_ACTIVE_COLOR;
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([2, 3]);
+      ctx.beginPath();
+      ctx.moveTo(xFromMin(pts[0].min), yFromPrice(pts[0].value));
+      for (var i = 1; i < pts.length; i++) ctx.lineTo(xFromMin(pts[i].min), yFromPrice(pts[i].value));
+      ctx.stroke();
+      ctx.setLineDash([]);
+    });
+
     segments.forEach(function (s) {
       const x1 = xFromMin(s.start_min);
       const x2 = xFromMin(s.end_min);
@@ -441,6 +483,47 @@
         ctx.fill();
         ctx.stroke();
       });
+    });
+
+    var markRadius = 10;
+    var markFont = "bold 14px system-ui, sans-serif";
+    plotTrades.forEach(function (tr) {
+      var entryMin = tr.entry_min != null ? tr.entry_min : null;
+      var exitMin = tr.exit_min != null ? tr.exit_min : null;
+      var dir = (tr.dir === "S" || tr.dir === "s") ? "S" : "B";
+      if (entryMin != null && tr.entryPx != null && Number.isFinite(tr.entryPx)) {
+        var ex = xFromMin(entryMin);
+        var ey = yFromPrice(tr.entryPx);
+        var sym = dir === "B" ? "+" : "−";
+        ctx.font = markFont;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.strokeStyle = "#fff";
+        ctx.lineWidth = 3;
+        ctx.strokeText(sym, ex, ey);
+        ctx.fillStyle = dir === "B" ? "#2E7D32" : "#C62828";
+        ctx.fillText(sym, ex, ey);
+        ctx.fillStyle = "#333";
+        ctx.font = "10px system-ui, sans-serif";
+        ctx.textBaseline = dir === "B" ? "top" : "bottom";
+        ctx.fillText(tr.entryPx.toFixed(2), ex, dir === "B" ? ey - markRadius - 2 : ey + markRadius + 2);
+      }
+      if (exitMin != null && tr.exitPx != null && Number.isFinite(tr.exitPx)) {
+        var xx = xFromMin(exitMin);
+        var xy = yFromPrice(tr.exitPx);
+        ctx.font = markFont;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.strokeStyle = "#fff";
+        ctx.lineWidth = 3;
+        ctx.strokeText("×", xx, xy);
+        ctx.fillStyle = "#C62828";
+        ctx.fillText("×", xx, xy);
+        ctx.fillStyle = "#333";
+        ctx.font = "10px system-ui, sans-serif";
+        ctx.textBaseline = "top";
+        ctx.fillText(tr.exitPx.toFixed(2), xx, xy + markRadius + 2);
+      }
     });
 
     ctx.fillStyle = "#333";
@@ -484,6 +567,9 @@
     var legendX = plotRight - 10;
     ctx.textAlign = "right";
     ctx.font = "11px system-ui, sans-serif";
+    ctx.fillStyle = "#555";
+    ctx.fillText("Lines", legendX, legendY + 4);
+    legendY += 18;
     if (revAvwapSeries.length > 0) {
       ctx.strokeStyle = REV_AVWAP_COLOR;
       ctx.setLineDash([4, 4]);
@@ -494,7 +580,7 @@
       ctx.stroke();
       ctx.setLineDash([]);
       ctx.fillStyle = "#333";
-      ctx.fillText("REV_avwap", legendX, legendY + 4);
+      ctx.fillText("REV_avwap (reversal VWAP)", legendX, legendY + 4);
       legendY += 18;
     }
     if (htfVwapSeries.length > 0) {
@@ -506,7 +592,7 @@
       ctx.lineTo(legendX - 10, legendY);
       ctx.stroke();
       ctx.fillStyle = "#333";
-      ctx.fillText("htfVwap", legendX, legendY + 4);
+      ctx.fillText("htfVwap (higher-timeframe VWAP)", legendX, legendY + 4);
       legendY += 18;
     }
     if (atrnowUpperSeries.length > 0) {
@@ -519,15 +605,67 @@
       ctx.stroke();
       ctx.setLineDash([]);
       ctx.fillStyle = "#333";
-      ctx.fillText("±atrnow", legendX, legendY + 4);
+      ctx.fillText("+/- atrnow (ATR band)", legendX, legendY + 4);
       legendY += 18;
     }
+    if (tradeAvwapSegments.length > 0) {
+      ctx.strokeStyle = TRADE_AVWAP_ACTIVE_COLOR;
+      ctx.setLineDash([2, 3]);
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(legendX - 40, legendY);
+      ctx.lineTo(legendX - 10, legendY);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = "#333";
+      ctx.fillText("TRADE_avwap (while trade open)", legendX, legendY + 4);
+      legendY += 18;
+    }
+    if (plotTrades.length > 0) {
+      ctx.fillStyle = "#555";
+      ctx.fillText("Trades", legendX, legendY + 4);
+      legendY += 18;
+      ctx.font = "bold 14px system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.strokeStyle = "#fff";
+      ctx.lineWidth = 2;
+      ctx.strokeText("+", legendX - 20, legendY);
+      ctx.fillStyle = "#2E7D32";
+      ctx.fillText("+", legendX - 20, legendY);
+      ctx.fillStyle = "#333";
+      ctx.font = "11px system-ui, sans-serif";
+      ctx.textAlign = "right";
+      ctx.textBaseline = "middle";
+      ctx.fillText("Buy entry", legendX, legendY + 4);
+      legendY += 18;
+      ctx.font = "bold 14px system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.strokeText("−", legendX - 20, legendY);
+      ctx.fillStyle = "#C62828";
+      ctx.fillText("−", legendX - 20, legendY);
+      ctx.fillStyle = "#333";
+      ctx.font = "11px system-ui, sans-serif";
+      ctx.textAlign = "right";
+      ctx.fillText("Sell entry", legendX, legendY + 4);
+      legendY += 18;
+      ctx.strokeText("×", legendX - 20, legendY);
+      ctx.fillStyle = "#C62828";
+      ctx.fillText("×", legendX - 20, legendY);
+      ctx.fillStyle = "#333";
+      ctx.fillText("Exit", legendX, legendY + 4);
+      legendY += 18;
+      ctx.textBaseline = "alphabetic";
+    }
+    ctx.fillStyle = "#555";
+    ctx.fillText("Segment tiers", legendX, legendY + 4);
+    legendY += 18;
     var tierOrder = ["elite", "high_quality", "tradable", "difficult", "low_edge", "non_tradable"];
     var ballRadius = 6;
     var ballX = legendX - 16;
     var textX = legendX - 28;
     tierOrder.forEach(function (t) {
-      var label = t === "" ? "—" : "Tier " + t;
+      var label = t === "" ? "—" : t;
       var ballY = legendY;
       ctx.beginPath();
       ctx.arc(ballX, ballY, ballRadius, 0, Math.PI * 2);
