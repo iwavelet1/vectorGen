@@ -298,8 +298,8 @@
       "elite": "#1565C0", "high_quality": "#2E7D32", "tradable": "#E65100",
       "difficult": "#C62828", "low_edge": "#7B1FA2", "non_tradable": "#455A64"
     };
-    const REV_AVWAP_COLOR = "#cc00cc";
-    const HTF_VWAP_COLOR = "#0d47a1";
+    const REV_AVWAP_COLOR = "#E65100";
+    const HTF_VWAP_COLOR = "#7B1FA2";
     const ATRNOW_BAND_COLOR = "#1976d2";
 
     let minP = Infinity;
@@ -307,9 +307,6 @@
     segments.forEach(function (s) {
       if (s.close_first != null && Number.isFinite(s.close_first)) { minP = Math.min(minP, s.close_first); maxP = Math.max(maxP, s.close_first); }
       if (s.close_last != null && Number.isFinite(s.close_last)) { minP = Math.min(minP, s.close_last); maxP = Math.max(maxP, s.close_last); }
-    });
-    revAvwapSeries.forEach(function (p) {
-      if (p.value != null && Number.isFinite(p.value)) { minP = Math.min(minP, p.value); maxP = Math.max(maxP, p.value); }
     });
     htfVwapSeries.forEach(function (p) {
       if (p.value != null && Number.isFinite(p.value)) { minP = Math.min(minP, p.value); maxP = Math.max(maxP, p.value); }
@@ -392,21 +389,6 @@
       ctx.stroke();
     }
 
-    if (revAvwapSeries.length > 0) {
-      ctx.strokeStyle = REV_AVWAP_COLOR;
-      ctx.lineWidth = 1.5;
-      ctx.setLineDash([4, 4]);
-      ctx.beginPath();
-      var first = true;
-      revAvwapSeries.forEach(function (p) {
-        var x = xFromMin(p.min);
-        var y = yFromPrice(p.value);
-        if (first) { ctx.moveTo(x, y); first = false; } else ctx.lineTo(x, y);
-      });
-      ctx.stroke();
-      ctx.setLineDash([]);
-    }
-
     if (atrnowUpperSeries.length > 0 && atrnowLowerSeries.length > 0) {
       ctx.strokeStyle = ATRNOW_BAND_COLOR;
       ctx.lineWidth = 1;
@@ -433,6 +415,7 @@
     if (htfVwapSeries.length > 0) {
       ctx.strokeStyle = HTF_VWAP_COLOR;
       ctx.lineWidth = 1.5;
+      ctx.setLineDash([2, 3]);
       ctx.beginPath();
       var first = true;
       htfVwapSeries.forEach(function (p) {
@@ -441,8 +424,8 @@
         if (first) { ctx.moveTo(x, y); first = false; } else ctx.lineTo(x, y);
       });
       ctx.stroke();
+      ctx.setLineDash([]);
     }
-
     var TRADE_AVWAP_ACTIVE_COLOR = "#e65100";
     tradeAvwapSegments.forEach(function (seg) {
       var pts = seg.points || [];
@@ -570,27 +553,15 @@
     ctx.fillStyle = "#555";
     ctx.fillText("Lines", legendX, legendY + 4);
     legendY += 18;
-    if (revAvwapSeries.length > 0) {
-      ctx.strokeStyle = REV_AVWAP_COLOR;
-      ctx.setLineDash([4, 4]);
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.moveTo(legendX - 40, legendY);
-      ctx.lineTo(legendX - 10, legendY);
-      ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.fillStyle = "#333";
-      ctx.fillText("REV_avwap (reversal VWAP)", legendX, legendY + 4);
-      legendY += 18;
-    }
     if (htfVwapSeries.length > 0) {
       ctx.strokeStyle = HTF_VWAP_COLOR;
-      ctx.setLineDash([]);
+      ctx.setLineDash([2, 3]);
       ctx.lineWidth = 1.5;
       ctx.beginPath();
       ctx.moveTo(legendX - 40, legendY);
       ctx.lineTo(legendX - 10, legendY);
       ctx.stroke();
+      ctx.setLineDash([]);
       ctx.fillStyle = "#333";
       ctx.fillText("htfVwap (higher-timeframe VWAP)", legendX, legendY + 4);
       legendY += 18;

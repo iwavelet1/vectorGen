@@ -62,9 +62,9 @@ function getDirsForKind(kind) {
     return out;
   }
   if (kind === "trades") {
+    const dataTrades = path.resolve(base, "Trades");
     if (process.env.TRADES_DIR) out.push(resolveDir(process.env.TRADES_DIR));
-    out.push(path.join(base, "Trades"), path.join(base, "trades"), base);
-    if (process.env.TRADES_FILE) out.unshift(path.dirname(resolveDir(process.env.TRADES_FILE)));
+    out.push(dataTrades);
     return out;
   }
   return [];
@@ -119,29 +119,12 @@ function listRawFiles(kind) {
     }
     result.push(...listRawFilesInDir(base));
   } else if (kind === "trades") {
-    if (tradesFileEnv && fs.existsSync(tradesFileEnv) && fs.statSync(tradesFileEnv).isFile()) {
-      const stat = fs.statSync(tradesFileEnv);
-      result.push({ name: path.basename(tradesFileEnv), count: countLines(tradesFileEnv), mtime: stat.mtimeMs });
-      return sortAndStrip(result);
+    const tradesDir = tradesDirEnv && fs.existsSync(tradesDirEnv) && fs.statSync(tradesDirEnv).isDirectory()
+      ? tradesDirEnv
+      : path.join(base, "Trades");
+    if (fs.existsSync(tradesDir) && fs.statSync(tradesDir).isDirectory()) {
+      result.push(...listRawFilesInDir(tradesDir));
     }
-    if (tradesDirEnv) {
-      result.push(...listRawFilesInDir(tradesDirEnv));
-      if (result.length) return sortAndStrip(result);
-    }
-    for (const dirName of ["Trades", "trades"]) {
-      const dir = path.join(base, dirName);
-      result.push(...listRawFilesInDir(dir));
-      if (result.length) return sortAndStrip(result);
-    }
-    for (const fileName of ["trades.jsonl", "Trades.jsonl"]) {
-      const fp = path.join(base, fileName);
-      if (fs.existsSync(fp) && fs.statSync(fp).isFile()) {
-        const stat = fs.statSync(fp);
-        result.push({ name: fileName, count: countLines(fp), mtime: stat.mtimeMs });
-        return sortAndStrip(result);
-      }
-    }
-    result.push(...listRawFilesInDir(base));
   } else if (kind === "raw_vectors") {
     const rawDir = process.env.RAW_VECTORS_DIR ? resolveDir(process.env.RAW_VECTORS_DIR) : null;
     const dir = rawDir || path.join(base, "raw_vectors");
@@ -301,7 +284,17 @@ function findRawFileByStem(stem) {
   return null;
 }
 
-/** Load bars from a single raw file. */
+/** Parse one JSONL line; normalizes NaN for Node (invalid JSON). */
+function parseJsonlLine(line) {
+  try {
+    const normalized = (line && typeof line === "string" ? line : "").replace(/\bNaN\b/g, "null");
+    return JSON.parse(normalized);
+  } catch {
+    return null;
+  }
+}
+
+/** Load bars from a single raw file. Handles NaN in JSON. */
 function loadBarsFromFile(fp) {
   const bars = [];
   let content;
@@ -312,11 +305,8 @@ function loadBarsFromFile(fp) {
   }
   const lines = content.split("\n").filter((line) => line.trim().length > 0);
   for (const line of lines) {
-    try {
-      bars.push(JSON.parse(line));
-    } catch {
-      /* skip */
-    }
+    const rec = parseJsonlLine(line);
+    if (rec && typeof rec === "object") bars.push(rec);
   }
   return bars;
 }
@@ -366,12 +356,7 @@ function getTradesForPlot(asset, date, tf) {
     const skipDateCheck = fileStem === prefix;
     const lines = content.split("\n").filter((line) => line.trim().length > 0);
     for (const line of lines) {
-      let rec;
-      try {
-        rec = JSON.parse(line);
-      } catch {
-        continue;
-      }
+      const rec = parseJsonlLine(line);
       if (!rec || typeof rec !== "object" || !recordMatches(rec, skipDateCheck)) continue;
       const event = (rec.event || "").toString().toLowerCase();
       const t = rec.time || rec.Time;
@@ -517,13 +502,36 @@ function getPlotVectors(asset, date, tf) {
 
   const plotTrades = getTradesForPlot(asset, date, tf);
 
+  const htfVwapSeries = [];
+  const revAvwapSeries = [];
+  let lastRevAvwap = null;
+  const seen = new Set();
+  for (const rawPath of matchedRawPaths) {
+    if (seen.has(rawPath)) continue;
+    seen.add(rawPath);
+    const rawBars = loadBarsFromFile(rawPath);
+    for (const b of rawBars) {
+      const t = b.time || b.Time;
+      const min = t ? parseStartTimeToMin(t) : null;
+      if (min == null) continue;
+      const htfV = b.htfVwap != null ? Number(b.htfVwap) : NaN;
+      if (Number.isFinite(htfV)) htfVwapSeries.push({ min, value: htfV });
+      let revV = b.REV_avwap != null ? Number(b.REV_avwap) : NaN;
+      if (Number.isFinite(revV)) lastRevAvwap = revV;
+      else if (lastRevAvwap != null) revV = lastRevAvwap;
+      if (min != null && Number.isFinite(revV)) revAvwapSeries.push({ min, value: revV });
+    }
+  }
+  htfVwapSeries.sort((a, b) => a.min - b.min);
+  revAvwapSeries.sort((a, b) => a.min - b.min);
+
   return {
     segments,
     barsInDay,
     sessionStartMin: SESSION_START_MIN,
     sessionEndMin: SESSION_END_MIN,
-    rev_avwap_series: [],
-    htf_vwap_series: [],
+    rev_avwap_series: revAvwapSeries,
+    htf_vwap_series: htfVwapSeries,
     atrnow_upper_series: [],
     atrnow_lower_series: [],
     trades: plotTrades,
@@ -634,9 +642,80 @@ const server = http.createServer((req, res) => {
     const date = url.searchParams.get("date") || "";
     const tf = url.searchParams.get("tf") || "";
     const data = getPlotVectors(asset, date, tf);
+    if (process.env.DEBUG_TRADES && data.trades) {
+      console.warn("[plot/vectors] asset=%s date=%s tf=%s trades=%d", asset, date, tf, data.trades.length);
+    }
     res.setHeader("Content-Type", "application/json");
     res.setHeader("Cache-Control", "no-store");
     res.end(JSON.stringify(data));
+    return;
+  }
+  if (req.method === "GET" && url.pathname === "/api/debug/trades") {
+    const asset = url.searchParams.get("asset") || "";
+    const date = url.searchParams.get("date") || "";
+    const tf = url.searchParams.get("tf") || "";
+    const dirs = getDirsForKind("trades");
+    const prefix = asset + "_" + date + "_" + tf;
+    const tried = [];
+    const trades = [];
+    const loadFile = (fp) => {
+      try {
+        const content = fs.readFileSync(fp, "utf8");
+        const fileStem = path.basename(fp, path.extname(fp));
+        const lines = content.split("\n").filter((l) => l.trim().length > 0);
+        tried.push({ file: path.basename(fp), lines: lines.length });
+        const tfMin = tfToMinutes(tf);
+        const wantYmd = dateToYmd(date);
+        const recordMatches = (rec, skipDateCheck) => {
+          const ticker = (rec.ticker || rec.tickerid || "").toString().toUpperCase();
+          const recTf = (rec.tf != null ? String(rec.tf) : "").trim();
+          if (ticker !== (asset || "").toString().toUpperCase() || recTf !== String(tf).trim()) return false;
+          if (skipDateCheck || !wantYmd) return true;
+          const t = rec.time || rec.Time;
+          if (t && typeof t === "string" && t.slice(0, 10) === wantYmd) return true;
+          return (rec.date != null && (String(rec.date).trim() === date || dateToYmd(String(rec.date).trim()) === wantYmd));
+        };
+        for (const line of lines) {
+          let rec;
+          try { rec = JSON.parse(line); } catch { continue; }
+          if (!rec || typeof rec !== "object" || !recordMatches(rec, fileStem === prefix)) continue;
+          const event = (rec.event || "").toString().toLowerCase();
+          const t = rec.time || rec.Time;
+          let barMin = t ? parseStartTimeToMin(t) : null;
+          if (barMin == null && rec.bar_index != null) barMin = SESSION_START_MIN + Number(rec.bar_index) * tfMin;
+          const entryPx = rec.entryPx != null && Number.isFinite(Number(rec.entryPx)) ? Number(rec.entryPx) : null;
+          const exitPx = rec.exitPx != null && Number.isFinite(Number(rec.exitPx)) ? Number(rec.exitPx) : null;
+          if (event === "entry" || event === "buy" || event === "sell" || event === "b" || event === "s") {
+            trades.push({ entry_min: barMin, entryPx, dir: (rec.dir === "S" || rec.dir === "s" || rec.dir === -1) ? "S" : "B" });
+          } else if ((event === "exit" || event === "close") && trades.length > 0 && trades[trades.length - 1].exit_min == null) {
+            trades[trades.length - 1].exit_min = barMin;
+            trades[trades.length - 1].exitPx = exitPx;
+          }
+        }
+      } catch (e) {
+        tried.push({ file: path.basename(fp), error: e.message });
+      }
+    };
+    for (const dir of dirs) {
+      if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) {
+        tried.push({ dir, exists: false });
+        continue;
+      }
+      const names = fs.readdirSync(dir).filter((f) => (f.endsWith(".jsonl") || f.endsWith(".json")) && (path.basename(f, path.extname(f)) === prefix || f.startsWith(prefix + "_")));
+      for (const name of names) {
+        loadFile(path.join(dir, name));
+        if (trades.length > 0) break;
+      }
+      if (trades.length > 0) break;
+      for (const name of fs.readdirSync(dir).filter((f) => f.endsWith(".jsonl") || f.endsWith(".json"))) {
+        loadFile(path.join(dir, name));
+        if (trades.length > 0) break;
+      }
+      if (trades.length > 0) break;
+    }
+    res.setHeader("Content-Type", "application/json");
+    res.setHeader("Cache-Control", "no-store");
+    res.end(JSON.stringify({ dirs, prefix, tried, tradesCount: trades.length, sample: trades[0] || null }));
     return;
   }
   if (req.method === "GET" && url.pathname.startsWith("/api/raw/")) {

@@ -10,7 +10,7 @@ from typing import Any
 
 # Attributes to drop from each vector record before writing
 VEC_DROP_ATTRS = frozenset({
-    "slope_pctPerMin", "atrNow", "atrBase", "shockScore", "shockDir",
+    "atrNow", "atrBase", "shockScore", "shockDir",
     "tShockScoreTot", "tShockDirTot", "tTrendAbs", "trendDir", "inTrendScore",
     "smaCrossDirInd", "smaCrossDirHTF", "htfSmaFastDir", "REV_avwap", "TRADE_avwap",
     "open", "high", "low", "hlc3", "ohlc4", "FSM_State", "prev_state", "new_state",

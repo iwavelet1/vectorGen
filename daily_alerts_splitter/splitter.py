@@ -69,6 +69,15 @@ def segments_from_edges(bars: list[dict], edge_ix: list[int]) -> list[list[dict]
     """
     if not edge_ix:
         return [bars] if bars else []
+    # Last RTH bar (16:00) index, if present; used when we run to end-of-day without a closing edge.
+    last_rth_ix: int | None = None
+    for idx, b in enumerate(bars):
+        dt = _parse_time(b.get("time")) if isinstance(b, dict) else None
+        if dt is None:
+            continue
+        hhmm = int(_time_to_hhmm(dt))
+        if hhmm <= 1600:
+            last_rth_ix = idx
     segments = []
     k = 0
     while k < len(edge_ix):
@@ -80,7 +89,12 @@ def segments_from_edges(bars: list[dict], edge_ix: list[int]) -> list[list[dict]
                 end_ix = edge_ix[j]
                 break
         else:
-            end_ix = len(bars) - 1
+            # No opposite edge found: run segment to last RTH bar (16:00) if available,
+            # otherwise to the very last bar.
+            if last_rth_ix is not None and last_rth_ix > start_ix:
+                end_ix = last_rth_ix
+            else:
+                end_ix = len(bars) - 1
         segments.append(bars[start_ix : end_ix + 1])
         if end_ix == start_ix:
             k += 1

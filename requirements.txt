@@ -1,3 +1,4 @@
 # Core deps for vectorGen.
 numpy
 pandas
+chromadb
