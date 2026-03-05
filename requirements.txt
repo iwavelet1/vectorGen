@@ -2,3 +2,4 @@
 numpy
 pandas
 chromadb
+aiokafka>=0.10.0
