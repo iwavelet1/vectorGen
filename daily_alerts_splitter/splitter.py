@@ -35,8 +35,24 @@ def is_edge(bar: dict) -> bool:
         return False
 
 
+def _dedup_bars(bars: list[dict]) -> list[dict]:
+    """Remove duplicates by (bar_index, event). First occurrence wins."""
+    seen: set[tuple] = set()
+    out: list[dict] = []
+    for b in bars:
+        bi = b.get("bar_index")
+        if bi is None:
+            out.append(b)
+            continue
+        key = (bi, b.get("event"))
+        if key not in seen:
+            seen.add(key)
+            out.append(b)
+    return out
+
+
 def load_bars(path: Path) -> list[dict]:
-    """Load JSONL file; return list of bar dicts sorted by time (then bar_index)."""
+    """Load JSONL file; dedup then return list of bar dicts sorted by time (then bar_index)."""
     bars = []
     with open(path, "r", encoding="utf-8") as f:
         for line in f:
@@ -47,6 +63,7 @@ def load_bars(path: Path) -> list[dict]:
                 bars.append(json.loads(line))
             except json.JSONDecodeError:
                 continue
+    bars = _dedup_bars(bars)
     # Sort by time, then bar_index
     def key(b):
         t = _parse_time(b.get("time"))

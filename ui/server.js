@@ -718,6 +718,33 @@ const server = http.createServer((req, res) => {
     res.end(JSON.stringify({ dirs, prefix, tried, tradesCount: trades.length, sample: trades[0] || null }));
     return;
   }
+  if (req.method === "GET" && url.pathname === "/api/virtual-trades") {
+    const asset = url.searchParams.get("asset") || "";
+    const date = url.searchParams.get("date") || "";
+    const tf = url.searchParams.get("tf") || "";
+    if (!asset || !date || !tf) {
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ trades: [], error: "asset, date, and tf required" }));
+      return;
+    }
+    const vtDir = process.env.VIRTUAL_TRADES_DIR
+      ? resolveDir(process.env.VIRTUAL_TRADES_DIR)
+      : path.join(DATA_BASE, "virtual_trades");
+    const fname = `${asset}_${date}_${tf}.jsonl`;
+    const fp = path.join(vtDir, fname);
+    const trades = [];
+    if (fs.existsSync(fp) && fs.statSync(fp).isFile()) {
+      const content = fs.readFileSync(fp, "utf8");
+      for (const line of content.split("\n")) {
+        if (!line.trim()) continue;
+        try { trades.push(JSON.parse(line)); } catch {}
+      }
+    }
+    res.setHeader("Content-Type", "application/json");
+    res.setHeader("Cache-Control", "no-store");
+    res.end(JSON.stringify({ trades }));
+    return;
+  }
   if (req.method === "GET" && url.pathname.startsWith("/api/raw/")) {
     const kind = url.pathname.slice("/api/raw/".length);
     if (!["alerts", "trades", "raw_vectors", "classified"].includes(kind)) {

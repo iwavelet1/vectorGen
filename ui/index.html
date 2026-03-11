@@ -11,6 +11,7 @@
     <button type="button" role="tab" id="tab-info" aria-selected="true" data-tab="info">Info</button>
     <button type="button" role="tab" id="tab-plot" aria-selected="false" data-tab="plot">Plot</button>
     <button type="button" role="tab" id="tab-raw" aria-selected="false" data-tab="raw">Raw</button>
+    <button type="button" role="tab" id="tab-vtrades" aria-selected="false" data-tab="vtrades">Virtual trade</button>
   </nav>
 
   <div class="content-wrap">
@@ -81,6 +82,21 @@
         <button type="button" id="btn-raw-list" class="plot-btn">List files</button>
         <button type="button" id="btn-raw-alerts" class="plot-btn">Show alerts</button>
       </div>
+      <div class="left-panel left-vtrades" id="left-vtrades" hidden>
+        <label for="vt-sel-asset">Asset</label>
+        <select id="vt-sel-asset" aria-label="Asset">
+          <option value="">—</option>
+        </select>
+        <label for="vt-sel-date">Date</label>
+        <select id="vt-sel-date" aria-label="Date">
+          <option value="">—</option>
+        </select>
+        <label for="vt-sel-tf">TF</label>
+        <select id="vt-sel-tf" aria-label="Timeframe">
+          <option value="">—</option>
+        </select>
+        <button type="button" id="btn-vt-show" class="plot-btn">Show trades</button>
+      </div>
     </aside>
     <main class="main-panel" id="main-panel">
       <div class="main-tab main-info" id="main-info">
@@ -128,6 +144,27 @@
               </table>
             </div>
           </div>
+        </div>
+      </div>
+      <div class="main-tab main-vtrades" id="main-vtrades" hidden>
+        <p class="placeholder vt-placeholder" id="vt-placeholder">Select Asset, Date, TF and click Show trades.</p>
+        <div class="vt-table-wrap" id="vt-table-wrap" hidden>
+          <p id="vt-summary"></p>
+          <table class="alerts-period-table">
+            <thead>
+              <tr>
+                <th>Entry time</th>
+                <th>Vector ID</th>
+                <th>Side</th>
+                <th>Entry</th>
+                <th>Exit</th>
+                <th>PnL</th>
+                <th>Bars</th>
+                <th>Minutes</th>
+              </tr>
+            </thead>
+            <tbody id="vt-body"></tbody>
+          </table>
         </div>
       </div>
       <div class="main-tab main-raw" id="main-raw" hidden>
